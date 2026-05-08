@@ -1,0 +1,1956 @@
+<!--
+  ────────────────────────────────────────────────────────────────────
+  Anveshan Influencer Invoice form (v2)
+  ────────────────────────────────────────────────────────────────────
+  Non-GST influencer self-serve invoice + reimbursement uploader.
+  POSTs the flat v2 payload (see buildPayload) to the Apps Script web
+  app and triggers a ZIP download from the base64 response.
+  ────────────────────────────────────────────────────────────────────
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Submit your invoice — Anveshan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+<script src="https://cdn.jsdelivr.net/npm/signature_pad@4.1.7/dist/signature_pad.umd.min.js"></script>
+
+<style>
+  :root {
+    --paper:      #F4ECDB;          /* warm cream */
+    --paper-2:    #EFE5CD;
+    --paper-edge: #E5D8B8;
+    --ink:        #1F2A22;          /* deep forest ink */
+    --ink-soft:   #4D584F;
+    --ink-mute:   #8E8B7A;
+    --forest:     #2D4A37;
+    --forest-deep:#1F3527;
+    --honey:      #C8923A;          /* honey-gold */
+    --honey-deep: #A8791E;
+    --honey-soft: #E9CD8A;
+    --rust:       #8C3A23;
+    --rule:       #2D4A37;
+    --line:       #C8B98C;
+    --line-soft:  #DCCFA6;
+    --error:      #8C3A23;
+    --error-bg:   #F1DDD3;
+    --tap:        48px;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  html { -webkit-text-size-adjust: 100%; }
+
+  body {
+    background: var(--paper);
+    /* faint paper grain */
+    background-image:
+      radial-gradient(rgba(45,74,55,0.025) 1px, transparent 1px),
+      radial-gradient(rgba(168,121,30,0.025) 1px, transparent 1px);
+    background-size: 3px 3px, 7px 7px;
+    background-position: 0 0, 1px 2px;
+    color: var(--ink);
+    font-family: 'Inter', system-ui, -apple-system, Segoe UI, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  ::selection { background: var(--honey-soft); color: var(--ink); }
+
+  /* ───────────── progress strip (sticky top) ───────────── */
+  .progress-strip {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    background: var(--paper);
+    border-bottom: 1px solid var(--line-soft);
+    backdrop-filter: blur(6px);
+  }
+  .progress-strip .inner {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 10px 22px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .progress-strip .label {
+    font-family: 'Fraunces', serif;
+    font-size: 13px;
+    font-style: italic;
+    color: var(--ink-soft);
+    white-space: nowrap;
+  }
+  .progress-track {
+    flex: 1;
+    height: 3px;
+    background: var(--paper-edge);
+    border-radius: 2px;
+    overflow: hidden;
+    position: relative;
+  }
+  .progress-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, var(--honey-deep), var(--honey));
+    transition: width .45s cubic-bezier(.2,.7,.2,1);
+  }
+  .progress-strip .count {
+    font-family: 'Fraunces', serif;
+    font-size: 13px;
+    color: var(--honey-deep);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  /* ───────────── shell ───────────── */
+  .page {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 0 14px 120px;
+  }
+  @media (min-width: 720px) {
+    .page { padding: 0 24px 160px; }
+  }
+
+  /* the bound-book card */
+  .card {
+    position: relative;
+    background: var(--paper-2);
+    margin: 18px 0 0;
+    padding: 36px 22px 56px 38px;
+    box-shadow:
+      0 1px 0 rgba(45,74,55,0.06),
+      0 24px 60px -32px rgba(45,74,55,0.18);
+  }
+  /* bound left edge: gold rule + stitching dots */
+  .card::before {
+    content: "";
+    position: absolute;
+    left: 16px; top: 24px; bottom: 24px;
+    width: 2px;
+    background: var(--honey);
+    opacity: 0.85;
+  }
+  .card::after {
+    content: "";
+    position: absolute;
+    left: 14px; top: 24px; bottom: 24px;
+    width: 6px;
+    background-image: radial-gradient(circle at center, var(--honey-deep) 1.4px, transparent 1.6px);
+    background-size: 6px 22px;
+    background-repeat: repeat-y;
+    opacity: 0.7;
+  }
+  @media (min-width: 720px) {
+    .card { padding: 64px 56px 80px 84px; margin-top: 32px; }
+    .card::before { left: 36px; top: 56px; bottom: 56px; }
+    .card::after  { left: 34px; top: 56px; bottom: 56px; }
+  }
+
+  /* ───────────── masthead ───────────── */
+  .wordmark {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 10px;
+    font-family: 'Fraunces', serif;
+    font-size: 14px;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    color: var(--forest);
+    margin: 0 0 64px;
+  }
+  .wordmark .seal {
+    width: 8px; height: 8px;
+    background: var(--honey);
+    border-radius: 50%;
+    box-shadow: 0 0 0 2px var(--paper-2), 0 0 0 3px var(--honey-deep);
+    transform: translateY(-2px);
+  }
+  .wordmark .place {
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    color: var(--ink-mute);
+  }
+
+  .doc-meta {
+    font-family: 'Fraunces', serif;
+    font-size: 12px;
+    font-style: italic;
+    color: var(--ink-mute);
+    letter-spacing: 0.04em;
+    margin: 0 0 14px;
+  }
+
+  h1.title {
+    font-family: 'Fraunces', serif;
+    font-weight: 400;
+    font-size: 36px;
+    line-height: 1.04;
+    letter-spacing: -0.012em;
+    color: var(--forest);
+    margin: 0 0 14px;
+    text-wrap: balance;
+  }
+  h1.title em {
+    font-style: italic;
+    font-weight: 400;
+    color: var(--honey-deep);
+    /* hand-drawn underline via gradient */
+    background-image: linear-gradient(transparent 78%, var(--honey-soft) 78%, var(--honey-soft) 96%, transparent 96%);
+    padding: 0 .04em;
+  }
+  @media (min-width: 720px) { h1.title { font-size: 56px; } }
+
+  .subtitle {
+    color: var(--ink-soft);
+    margin: 0 0 36px;
+    max-width: 46ch;
+    text-wrap: pretty;
+    font-size: 16px;
+    line-height: 1.6;
+  }
+  @media (min-width: 720px) { .subtitle { margin-bottom: 56px; } }
+
+  /* ornamental divider */
+  .ornament {
+    text-align: center;
+    color: var(--honey-deep);
+    font-family: 'Fraunces', serif;
+    font-size: 22px;
+    letter-spacing: 0.6em;
+    line-height: 1;
+    margin: 56px 0 36px;
+    opacity: 0.85;
+    user-select: none;
+  }
+  .ornament::before, .ornament::after {
+    content: "";
+    display: inline-block;
+    width: 48px;
+    height: 1px;
+    background: var(--line);
+    vertical-align: middle;
+    margin: 0 16px 6px;
+  }
+
+  /* ───────────── section ───────────── */
+  section { margin: 0; position: relative; }
+  .section-head {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    margin: 0 0 28px;
+  }
+  .section-num {
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-weight: 400;
+    font-size: 22px;
+    color: var(--honey-deep);
+    flex: 0 0 auto;
+    line-height: 1;
+  }
+  .section-title {
+    font-family: 'Fraunces', serif;
+    font-weight: 500;
+    font-size: 26px;
+    line-height: 1.1;
+    margin: 0;
+    color: var(--forest);
+  }
+  .section-note {
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    color: var(--ink-mute);
+    font-size: 14px;
+    margin: 6px 0 0;
+  }
+
+  /* ───────────── GST toggle (dual switch) ───────────── */
+  .choice {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    background: var(--paper);
+    border: 1px solid var(--line);
+    padding: 4px;
+    position: relative;
+  }
+  .choice input { position: absolute; opacity: 0; pointer-events: none; }
+  .choice label {
+    text-align: center;
+    padding: 14px 12px;
+    font-size: 14.5px;
+    font-weight: 500;
+    color: var(--ink-soft);
+    cursor: pointer;
+    user-select: none;
+    transition: color .2s ease;
+    position: relative;
+    z-index: 1;
+  }
+  .choice input:checked + label { color: var(--paper); }
+  .choice .pill {
+    position: absolute;
+    top: 4px; bottom: 4px;
+    left: 4px;
+    width: calc(50% - 4px);
+    background: var(--forest);
+    transition: transform .25s cubic-bezier(.2,.7,.2,1);
+    z-index: 0;
+  }
+  .choice[data-choice="registered"] .pill { transform: translateX(100%); }
+
+  /* ───────────── fields ───────────── */
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+  @media (min-width: 600px) {
+    .grid { grid-template-columns: 1fr 1fr; column-gap: 28px; }
+    .grid .col-2 { grid-column: span 2; }
+  }
+  .field { display: flex; flex-direction: column; min-width: 0; position: relative; }
+  .field label {
+    font-family: 'Inter', sans-serif;
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    margin-bottom: 8px;
+  }
+  .field .req { color: var(--honey-deep); margin-left: 3px; }
+  .field .opt {
+    color: var(--ink-mute);
+    margin-left: 8px;
+    font-style: italic;
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 400;
+    font-family: 'Fraunces', serif;
+    font-size: 13px;
+  }
+
+  .field input,
+  .field select,
+  .field textarea {
+    font: inherit;
+    color: var(--ink);
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--line);
+    border-radius: 0;
+    padding: 8px 2px;
+    height: var(--tap);
+    width: 100%;
+    transition: border-color .2s ease, background .2s ease;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+  .field input::placeholder, .field textarea::placeholder {
+    color: var(--ink-mute);
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-size: 16px;
+  }
+  .field select {
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path d='M1 1.5l5 5 5-5' fill='none' stroke='%232D4A37' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 4px center;
+    padding-right: 26px;
+  }
+  .field input:focus,
+  .field select:focus,
+  .field textarea:focus {
+    outline: none;
+    border-color: var(--forest);
+    background: linear-gradient(transparent 60%, rgba(233,205,138,.30) 60%);
+  }
+  .field.invalid input,
+  .field.invalid select { border-color: var(--error); background: var(--error-bg); }
+
+  .helper {
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-size: 13px;
+    color: var(--ink-mute);
+    margin: 8px 0 0;
+    min-height: 1em;
+    line-height: 1.4;
+  }
+  .field.invalid .helper { color: var(--error); font-style: normal; font-family: 'Inter', sans-serif; font-size: 12.5px; }
+
+  .input-mono {
+    font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    font-size: 15px;
+  }
+
+  /* ───────────── prominent amount ───────────── */
+  .amount-block {
+    margin-top: 8px;
+    padding: 24px 22px 22px;
+    background:
+      linear-gradient(180deg, transparent 0%, transparent 100%),
+      var(--paper);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--honey);
+    position: relative;
+  }
+  .amount-block .amount-label {
+    font-family: 'Inter', sans-serif;
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    margin: 0 0 10px;
+  }
+  .amount-wrap {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    border-bottom: 1px dashed var(--line);
+    padding-bottom: 10px;
+  }
+  .amount-wrap .currency {
+    font-family: 'Fraunces', serif;
+    font-size: 38px;
+    color: var(--forest);
+    line-height: 1;
+  }
+  .amount-wrap input {
+    font-family: 'Fraunces', serif;
+    font-size: 44px;
+    font-weight: 400;
+    color: var(--forest);
+    border: none !important;
+    background: transparent !important;
+    height: auto;
+    padding: 0;
+    flex: 1;
+    min-width: 0;
+    line-height: 1;
+  }
+  .amount-wrap input:focus { background: transparent !important; }
+  .amount-wrap input::placeholder { font-size: 44px; color: var(--line); font-style: normal; }
+  .field.invalid .amount-wrap { border-bottom-color: var(--error); }
+
+  /* tax receipt */
+  .receipt {
+    margin-top: 16px;
+    border-top: 1px solid var(--line);
+    padding-top: 14px;
+  }
+  .receipt-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 6px 0;
+    font-size: 14.5px;
+    color: var(--ink-soft);
+  }
+  .receipt-row .lbl {
+    display: flex; align-items: baseline; gap: 8px;
+  }
+  .receipt-row .pct {
+    font-size: 11.5px;
+    color: var(--ink-mute);
+    font-variant-numeric: tabular-nums;
+  }
+  .receipt-row.split { padding-left: 18px; font-size: 13.5px; color: var(--ink-mute); }
+  .receipt-row .val {
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+    font-feature-settings: 'tnum' 1;
+  }
+  .receipt-row.total {
+    margin-top: 10px;
+    padding-top: 14px;
+    border-top: 1px dashed var(--line);
+    font-family: 'Fraunces', serif;
+    font-size: 22px;
+    color: var(--forest);
+    font-weight: 500;
+  }
+  .receipt-row.total .val {
+    font-family: 'Fraunces', serif;
+    font-size: 26px;
+    color: var(--honey-deep);
+    font-weight: 500;
+  }
+  .receipt-note {
+    margin: 10px 0 0;
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-size: 13px;
+    color: var(--ink-mute);
+    line-height: 1.5;
+  }
+  .receipt-treatment {
+    display: inline-block;
+    margin-bottom: 4px;
+    font-family: 'Inter', sans-serif;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--forest);
+    background: var(--honey-soft);
+    padding: 3px 8px;
+  }
+
+  /* ───────────── signature ───────────── */
+  .sig-frame {
+    border: 1px solid var(--line);
+    background: #fffefb;
+    position: relative;
+    margin-top: 12px;
+    box-shadow: inset 0 0 0 1px rgba(168,121,30,0.06);
+  }
+  canvas#sig {
+    display: block;
+    width: 100%;
+    height: 220px;
+    touch-action: none;
+    cursor: crosshair;
+  }
+  .sig-baseline {
+    position: absolute;
+    left: 24px; right: 24px;
+    bottom: 40px;
+    border-bottom: 1px solid var(--ink-soft);
+    pointer-events: none;
+  }
+  .sig-x {
+    position: absolute;
+    left: 22px;
+    bottom: 38px;
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-size: 22px;
+    color: var(--ink-soft);
+    pointer-events: none;
+  }
+  .sig-hint {
+    position: absolute;
+    left: 0; right: 0;
+    bottom: 14px;
+    text-align: center;
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-size: 13px;
+    color: var(--ink-mute);
+    pointer-events: none;
+    transition: opacity .2s ease;
+  }
+  .sig-frame.has-stroke .sig-hint { opacity: 0; }
+
+  .sig-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 14px;
+    justify-content: flex-end;
+  }
+  .btn {
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    border-radius: 999px;
+    height: 40px;
+    padding: 0 18px;
+    cursor: pointer;
+    border: 1px solid var(--forest);
+    background: transparent;
+    color: var(--forest);
+    transition: background .2s, color .2s;
+  }
+  .btn:hover { background: var(--forest); color: var(--paper); }
+  .btn:focus-visible { outline: 2px solid var(--honey-deep); outline-offset: 2px; }
+  .btn.ghost { border-color: var(--line); color: var(--ink-soft); }
+  .btn.ghost:hover { background: var(--paper); color: var(--ink); border-color: var(--ink-soft); }
+
+  /* ───────────── consent ───────────── */
+  .consent {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    margin-top: 32px;
+    cursor: pointer;
+    user-select: none;
+    padding: 18px 18px 18px 16px;
+    background: var(--paper);
+    border-left: 3px solid var(--honey);
+    position: relative;
+  }
+  .consent input { position: absolute; opacity: 0; pointer-events: none; }
+  .consent .box {
+    flex: 0 0 22px;
+    width: 22px; height: 22px;
+    border: 1.5px solid var(--forest);
+    background: transparent;
+    margin-top: 2px;
+    display: grid; place-items: center;
+    transition: background .2s;
+  }
+  .consent .box svg { opacity: 0; transition: opacity .15s; }
+  .consent input:checked ~ .box {
+    background: var(--forest);
+    border-color: var(--forest);
+  }
+  .consent input:checked ~ .box svg { opacity: 1; }
+  .consent input:focus-visible ~ .box { outline: 2px solid var(--honey-deep); outline-offset: 2px; }
+  .consent .text {
+    font-size: 15px;
+    color: var(--ink);
+    line-height: 1.55;
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+  }
+
+  /* ───────────── submit ───────────── */
+  .submit-row {
+    margin-top: 48px;
+    text-align: center;
+  }
+  .submit {
+    width: 100%;
+    height: 64px;
+    background: var(--forest);
+    color: var(--paper);
+    border: none;
+    border-radius: 999px;
+    font-family: 'Fraunces', serif;
+    font-size: 20px;
+    font-weight: 500;
+    letter-spacing: 0.005em;
+    cursor: pointer;
+    transition: background .2s, transform .05s, opacity .2s, box-shadow .2s;
+    position: relative;
+    box-shadow: 0 4px 0 var(--forest-deep);
+  }
+  .submit:hover:not(:disabled) {
+    background: var(--forest-deep);
+    box-shadow: 0 2px 0 var(--forest-deep);
+    transform: translateY(2px);
+  }
+  .submit:active:not(:disabled) {
+    transform: translateY(4px);
+    box-shadow: 0 0 0 var(--forest-deep);
+  }
+  .submit:disabled {
+    background: var(--paper);
+    color: var(--ink-mute);
+    border: 1px dashed var(--line);
+    box-shadow: none;
+    cursor: not-allowed;
+  }
+  .submit:focus-visible { outline: 2px solid var(--honey-deep); outline-offset: 4px; }
+
+  .submit-hint {
+    text-align: center;
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-size: 14px;
+    color: var(--ink-mute);
+    margin: 16px 0 0;
+    min-height: 1em;
+  }
+
+  /* ───────────── colophon ───────────── */
+  .colophon {
+    margin-top: 64px;
+    padding-top: 24px;
+    border-top: 1px solid var(--line-soft);
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-size: 12.5px;
+    color: var(--ink-mute);
+    flex-wrap: wrap;
+  }
+
+  /* ───────────── success ───────────── */
+  .success {
+    text-align: left;
+    padding: 32px 0 16px;
+  }
+  .success .seal-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 32px;
+  }
+  .success .seal {
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    background: var(--forest);
+    color: var(--honey-soft);
+    display: grid; place-items: center;
+    font-family: 'Fraunces', serif;
+    font-size: 28px;
+    box-shadow: inset 0 0 0 2px var(--honey), 0 6px 24px -8px rgba(45,74,55,.4);
+    transform: rotate(-6deg);
+  }
+  .success .stamp {
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-size: 16px;
+    color: var(--honey-deep);
+    letter-spacing: 0.04em;
+  }
+  .success h2 {
+    font-family: 'Fraunces', serif;
+    font-weight: 500;
+    font-size: 44px;
+    margin: 0 0 18px;
+    line-height: 1.05;
+    color: var(--forest);
+  }
+  @media (min-width: 720px) { .success h2 { font-size: 60px; } }
+  .success p {
+    color: var(--ink-soft);
+    margin: 0 0 12px;
+    max-width: 46ch;
+    text-wrap: pretty;
+    font-size: 17px;
+    line-height: 1.55;
+  }
+  .success .email {
+    color: var(--forest);
+    font-weight: 600;
+    border-bottom: 1.5px solid var(--honey);
+  }
+  .success .next {
+    margin-top: 28px;
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-size: 14px;
+    color: var(--ink-mute);
+  }
+
+  /* ───────────── description counter ───────────── */
+  .char-counter {
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-size: 12px;
+    color: var(--ink-mute);
+    margin-left: 8px;
+    font-variant-numeric: tabular-nums;
+  }
+  .char-counter.over { color: var(--error); font-style: normal; font-family: 'Inter', sans-serif; font-weight: 500; }
+
+  /* ───────────── reimbursements ───────────── */
+  .reimb-section { margin-top: 28px; }
+  .reimb-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    flex-wrap: wrap; gap: 8px;
+    margin: 0 0 6px;
+  }
+  .reimb-head .label {
+    font-family: 'Inter', sans-serif;
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+  .reimb-head .opt {
+    color: var(--ink-mute);
+    margin-left: 8px;
+    font-style: italic;
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 400;
+    font-family: 'Fraunces', serif;
+    font-size: 13px;
+  }
+  .reimb-head .count {
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-size: 13px;
+    color: var(--ink-mute);
+  }
+  .reimb-help {
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-size: 13px;
+    color: var(--ink-mute);
+    margin: 0 0 14px;
+    line-height: 1.5;
+  }
+  .reimb-list { display: flex; flex-direction: column; gap: 14px; }
+  .reimb-empty {
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-size: 14px;
+    color: var(--ink-mute);
+    padding: 12px 0;
+  }
+  .reimb-row {
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--honey);
+    padding: 16px 16px 14px;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 12px;
+    position: relative;
+  }
+  @media (min-width: 720px) {
+    .reimb-row {
+      grid-template-columns: 28px 1fr 140px 1fr 32px;
+      align-items: end;
+      gap: 14px;
+    }
+  }
+  .reimb-row .reimb-num {
+    font-family: 'Fraunces', serif;
+    font-style: italic;
+    font-size: 18px;
+    color: var(--honey-deep);
+    line-height: 1;
+    align-self: center;
+    display: none;
+  }
+  @media (min-width: 720px) {
+    .reimb-row .reimb-num { display: block; }
+  }
+  .reimb-row label {
+    font-family: 'Inter', sans-serif;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    display: block;
+    margin-bottom: 6px;
+  }
+  .reimb-row input[type="text"],
+  .reimb-row input[type="number"] {
+    font: inherit;
+    color: var(--ink);
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--line);
+    border-radius: 0;
+    padding: 6px 2px;
+    height: 40px;
+    width: 100%;
+    -webkit-appearance: none;
+    appearance: none;
+  }
+  .reimb-row input:focus {
+    outline: none;
+    border-color: var(--forest);
+    background: linear-gradient(transparent 60%, rgba(233,205,138,.30) 60%);
+  }
+  .reimb-row .file-picker {
+    position: relative;
+  }
+  .reimb-row .file-picker input[type="file"] {
+    position: absolute;
+    width: 1px; height: 1px;
+    opacity: 0;
+    overflow: hidden;
+  }
+  .reimb-row .file-picker .file-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: 'Inter', sans-serif;
+    font-size: 13px;
+    color: var(--forest);
+    border: 1px dashed var(--line);
+    background: var(--paper-2);
+    padding: 8px 12px;
+    cursor: pointer;
+    height: 40px;
+    width: 100%;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .reimb-row .file-picker:hover .file-btn { border-color: var(--forest); }
+  .reimb-row .file-picker.has-file .file-btn { background: var(--honey-soft); border-style: solid; color: var(--ink); }
+  .reimb-row .file-picker.invalid .file-btn { border-color: var(--error); background: var(--error-bg); color: var(--error); border-style: solid; }
+  .reimb-row .reimb-remove {
+    background: transparent;
+    border: none;
+    color: var(--ink-mute);
+    cursor: pointer;
+    font-size: 22px;
+    line-height: 1;
+    height: 40px;
+    width: 100%;
+    padding: 0;
+    transition: color .15s;
+  }
+  .reimb-row .reimb-remove:hover { color: var(--rust); }
+  @media (min-width: 720px) {
+    .reimb-row .reimb-remove { width: 32px; }
+  }
+  .reimb-row .row-error {
+    grid-column: 1 / -1;
+    font-family: 'Inter', sans-serif;
+    font-size: 12.5px;
+    color: var(--error);
+    margin: 0;
+    min-height: 1em;
+  }
+  .reimb-add {
+    margin-top: 14px;
+    font-family: 'Inter', sans-serif;
+    font-size: 13.5px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    color: var(--forest);
+    background: transparent;
+    border: 1px dashed var(--forest);
+    padding: 12px 18px;
+    cursor: pointer;
+    transition: background .15s, color .15s, border-style .15s;
+  }
+  .reimb-add:hover:not(:disabled) { background: var(--forest); color: var(--paper); border-style: solid; }
+  .reimb-add:disabled { color: var(--ink-mute); border-color: var(--line); cursor: not-allowed; }
+
+  /* running total below reimbursements */
+  .running-total {
+    margin-top: 22px;
+    padding: 16px 18px;
+    background: var(--paper);
+    border-top: 1px dashed var(--line);
+    border-bottom: 1px dashed var(--line);
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 10px;
+    font-family: 'Fraunces', serif;
+  }
+  .running-total .breakdown {
+    font-size: 14px;
+    color: var(--ink-soft);
+    font-style: italic;
+  }
+  .running-total .total-amount {
+    font-size: 26px;
+    font-weight: 500;
+    color: var(--honey-deep);
+    font-variant-numeric: tabular-nums;
+  }
+  .payload-warn {
+    margin: 12px 0 0;
+    font-family: 'Inter', sans-serif;
+    font-size: 12.5px;
+    color: var(--error);
+  }
+
+  /* ───────────── success download CTA ───────────── */
+  .success .download {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    height: 60px;
+    padding: 0 28px;
+    margin: 8px 0 24px;
+    background: var(--forest);
+    color: var(--paper);
+    border: none;
+    border-radius: 999px;
+    font-family: 'Fraunces', serif;
+    font-size: 18px;
+    font-weight: 500;
+    cursor: pointer;
+    box-shadow: 0 4px 0 var(--forest-deep);
+    transition: background .2s, transform .05s, box-shadow .2s;
+  }
+  .success .download:hover {
+    background: var(--forest-deep);
+    box-shadow: 0 2px 0 var(--forest-deep);
+    transform: translateY(2px);
+  }
+  .success .download .arrow { font-size: 22px; }
+
+  /* utility */
+  .hidden { display: none !important; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ============== Sticky progress ============== -->
+<div class="progress-strip" role="status" aria-label="Form progress">
+  <div class="inner">
+    <span class="label">Filling out</span>
+    <div class="progress-track" aria-hidden="true"><div class="progress-fill" id="progressFill"></div></div>
+    <span class="count"><span id="progressCount">0</span>&thinsp;/&thinsp;<span id="progressTotal">0</span></span>
+  </div>
+</div>
+
+<main class="page">
+
+  <article class="card">
+
+    <!-- ============== Header ============== -->
+    <p class="wordmark">
+      <span class="seal" aria-hidden="true"></span>
+      Anveshan
+      <span class="place">Gurugram · est. 2017</span>
+    </p>
+
+    <p class="doc-meta">Vendor invoice form · for influencer partners</p>
+
+    <h1 class="title">Generate your <em>Bill of Supply</em>.</h1>
+    <p class="subtitle">A standardized invoice in 3 minutes. Once submitted, email the invoice and the downloaded ZIP file to your Anveshan PoC for payment.</p>
+
+    <!-- ============== Form ============== -->
+    <form id="invoice-form" novalidate>
+
+      <div class="ornament" aria-hidden="true">&#10086;</div>
+
+      <!-- ===== Your details ===== -->
+      <section aria-labelledby="details-heading">
+        <div class="section-head">
+          <span class="section-num">i.</span>
+          <h2 class="section-title" id="details-heading">Your details</h2>
+        </div>
+
+        <div class="grid">
+          <div class="field col-2" data-field="tradeName">
+            <label for="tradeName">Trade or company name<span class="req">*</span></label>
+            <input id="tradeName" name="tradeName" type="text" autocomplete="organization" required />
+            <p class="helper">Or your full name if you operate as a sole proprietor.</p>
+          </div>
+
+          <div class="field col-2" data-field="signatoryName">
+            <label for="signatoryName">Authorised signatory<span class="req">*</span></label>
+            <input id="signatoryName" name="signatoryName" type="text" autocomplete="name" required />
+            <p class="helper"></p>
+          </div>
+
+          <div class="field col-2" data-field="email">
+            <label for="email">Email<span class="req">*</span></label>
+            <input id="email" name="email" type="email" inputmode="email" autocomplete="email" required />
+            <p class="helper">We'll send the final invoice PDF here.</p>
+          </div>
+
+          <div class="field col-2" data-field="pan">
+            <label for="pan">PAN<span class="req">*</span></label>
+            <input id="pan" name="pan" class="input-mono" type="text" maxlength="10" autocomplete="off" required placeholder="ABCDE1234F" />
+            <p class="helper">10 chars · ABCDE1234F</p>
+          </div>
+
+          <div class="field col-2" data-field="address1">
+            <label for="address1">Address line 1<span class="req">*</span></label>
+            <input id="address1" name="address1" type="text" autocomplete="address-line1" required />
+            <p class="helper"></p>
+          </div>
+
+          <div class="field col-2" data-field="address2">
+            <label for="address2">Address line 2<span class="opt">optional</span></label>
+            <input id="address2" name="address2" type="text" autocomplete="address-line2" />
+            <p class="helper"></p>
+          </div>
+
+          <div class="field" data-field="city">
+            <label for="city">City<span class="req">*</span></label>
+            <input id="city" name="city" type="text" autocomplete="address-level2" required />
+            <p class="helper"></p>
+          </div>
+
+          <div class="field" data-field="state">
+            <label for="state">State / UT<span class="req">*</span></label>
+            <select id="state" name="state" required>
+              <option value="" disabled selected></option>
+            </select>
+            <p class="helper">Sets your tax treatment.</p>
+          </div>
+
+          <div class="field" data-field="pincode">
+            <label for="pincode">Pincode<span class="req">*</span></label>
+            <input id="pincode" name="pincode" type="text" inputmode="numeric" maxlength="6" autocomplete="postal-code" required />
+            <p class="helper">6 digits</p>
+          </div>
+
+          <div class="field" data-field="bankAccountName">
+            <label for="bankAccountName">Account name<span class="req">*</span></label>
+            <input id="bankAccountName" name="bankAccountName" type="text" required />
+            <p class="helper">Defaults to trade name.</p>
+          </div>
+
+          <div class="field" data-field="bankName">
+            <label for="bankName">Bank<span class="req">*</span></label>
+            <input id="bankName" name="bankName" type="text" required />
+            <p class="helper"></p>
+          </div>
+
+          <div class="field" data-field="accountNumber">
+            <label for="accountNumber">Account number<span class="req">*</span></label>
+            <input id="accountNumber" name="accountNumber" type="text" inputmode="numeric" maxlength="20" required />
+            <p class="helper"></p>
+          </div>
+
+          <div class="field" data-field="ifsc">
+            <label for="ifsc">IFSC<span class="req">*</span></label>
+            <input id="ifsc" name="ifsc" class="input-mono" type="text" maxlength="11" autocomplete="off" required placeholder="HDFC0001234" />
+            <p class="helper">11 chars · ABCD0123456</p>
+          </div>
+        </div>
+      </section>
+
+      <div class="ornament" aria-hidden="true">&#10086;</div>
+
+      <!-- ===== Invoice details ===== -->
+      <section aria-labelledby="invoice-heading">
+        <div class="section-head">
+          <span class="section-num">ii.</span>
+          <h2 class="section-title" id="invoice-heading">Invoice details</h2>
+        </div>
+
+        <div class="grid">
+          <div class="field" data-field="invoiceNumber">
+            <label for="invoiceNumber">Invoice no.<span class="req">*</span></label>
+            <input id="invoiceNumber" name="invoiceNumber" type="text" required placeholder="INV-2026-001" />
+            <p class="helper">From your own series.</p>
+          </div>
+
+          <div class="field" data-field="invoiceDate">
+            <label for="invoiceDate">Invoice date<span class="req">*</span></label>
+            <input id="invoiceDate" name="invoiceDate" type="date" required />
+            <p class="helper"></p>
+          </div>
+
+          <div class="field col-2" data-field="description">
+            <label for="description">
+              What's this invoice for?<span class="req">*</span>
+              <span class="char-counter" id="descCounter">0 / 80</span>
+            </label>
+            <input id="description" name="description" type="text" maxlength="80" required
+                   placeholder="e.g., Reel campaign — May 2026, 3 deliverables" />
+            <p class="helper">Keep it short — it appears as the first line item on your invoice.</p>
+          </div>
+
+          <div class="field col-2" data-field="serviceAmount">
+            <div class="amount-block">
+              <p class="amount-label">Service amount <span class="req" style="color:var(--honey-deep)">*</span></p>
+              <div class="amount-wrap">
+                <span class="currency" aria-hidden="true">₹</span>
+                <input id="serviceAmount" name="serviceAmount" type="number" min="1" step="1" inputmode="numeric" required placeholder="0" />
+              </div>
+              <p class="helper" style="margin-top:8px">Whole rupees only. The amount you type is the final amount — no tax is added on top.</p>
+            </div>
+          </div>
+
+          <div class="reimb-section col-2" data-field="reimbursements">
+            <div class="reimb-head">
+              <span class="label">Reimbursements <span class="opt">optional</span></span>
+              <span class="count"><span id="reimbCount">0</span> / 10</span>
+            </div>
+            <p class="reimb-help">Add any campaign expenses you paid for and want reimbursed (petrol, studio rental, props, etc.). Attach the original bill for each — PDF, JPG, or PNG, up to 5&nbsp;MB each.</p>
+
+            <div class="reimb-list" id="reimbList">
+              <p class="reimb-empty" id="reimbEmpty">No reimbursements yet.</p>
+            </div>
+
+            <button type="button" class="reimb-add" id="reimbAdd">+ Add reimbursement</button>
+
+            <div class="running-total" aria-live="polite">
+              <span class="breakdown" id="totalBreakdown">Service ₹0 + Reimbursements ₹0</span>
+              <span class="total-amount" id="totalAmount">₹0</span>
+            </div>
+            <p class="payload-warn hidden" id="payloadWarn"></p>
+          </div>
+
+          <div class="field col-2" data-field="reference">
+            <label for="reference">Reference<span class="opt">optional</span></label>
+            <input id="reference" name="reference" type="text" placeholder="Post URL, campaign name, or PO number" />
+            <p class="helper"></p>
+          </div>
+        </div>
+      </section>
+
+      <div class="ornament" aria-hidden="true">&#10086;</div>
+
+      <!-- ===== Signature & consent ===== -->
+      <section aria-labelledby="sign-heading">
+        <div class="section-head">
+          <span class="section-num">iii.</span>
+          <h2 class="section-title" id="sign-heading">Signature &amp; consent</h2>
+        </div>
+        <p class="section-note">Sign with your finger on phone, or mouse on desktop.</p>
+
+        <div class="sig-frame" id="sigFrame">
+          <canvas id="sig" aria-label="Signature pad"></canvas>
+          <span class="sig-x" aria-hidden="true">×</span>
+          <div class="sig-baseline" aria-hidden="true"></div>
+          <div class="sig-hint" id="sigHint">Sign on the line</div>
+        </div>
+
+        <div class="sig-actions">
+          <button type="button" class="btn ghost" id="sigClear">Clear</button>
+          <button type="button" class="btn" id="sigDone">Done</button>
+        </div>
+
+        <div class="field" data-field="typedName" style="margin-top:32px">
+          <label for="typedName">Type your full name to confirm<span class="req">*</span></label>
+          <input id="typedName" name="typedName" type="text" required />
+          <p class="helper"></p>
+        </div>
+
+        <label class="consent" data-field="consent">
+          <input type="checkbox" id="consent" name="consent" required />
+          <span class="box" aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <path d="M2.5 7.5L5.5 10.5L11.5 4" stroke="#F4ECDB" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </span>
+          <span class="text">I confirm the above details are correct and authorise this invoice for payment by Anveshan.</span>
+        </label>
+      </section>
+
+      <div class="submit-row">
+        <button type="submit" class="submit" id="submitBtn" disabled>Generate &amp; submit invoice</button>
+        <p class="submit-hint" id="submitHint">Complete all fields &amp; sign to enable</p>
+      </div>
+    </form>
+
+    <!-- ============== Success ============== -->
+    <div class="success hidden" id="successView" aria-live="polite">
+      <div class="seal-wrap">
+        <div class="seal" aria-hidden="true">✓</div>
+        <span class="stamp">Sealed &amp; ready</span>
+      </div>
+      <h2>Invoice generated.</h2>
+      <p>Your invoice and any attached bills have been bundled into a ZIP. The download should have started automatically — if it didn't, click the button below.</p>
+
+      <button type="button" class="download" id="downloadBtn">
+        <span class="arrow" aria-hidden="true">↓</span>
+        <span>Download your invoice (.zip)</span>
+      </button>
+
+      <p>Email this zip to <a id="mailtoLink" class="email" href="mailto:kaushiki@anveshan.farm">kaushiki@anveshan.farm</a>. We'll process payment soon.</p>
+      <p class="next">You can close this tab once the email is sent.</p>
+    </div>
+
+    <div class="colophon">
+      <span>Anveshan Farms Pvt. Ltd.</span>
+      <span>invoice.anveshan.farm</span>
+    </div>
+
+  </article>
+</main>
+
+<script>
+/* ------------------------------------------------------------------ */
+/*  Back-end endpoint                                                  */
+/* ------------------------------------------------------------------ */
+const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxzOvxkaYZcw_1_2vZKHs9W1SV9rzMpof3PijcgybT68loromECMXTCDCL2fs-04Bm2/exec';
+
+/* ------------------------------------------------------------------ */
+/*  Static config (mirrors back-end CONFIG limits)                     */
+/* ------------------------------------------------------------------ */
+const LIMITS = {
+  MAX_FILE_SIZE_MB:      5,
+  MAX_REIMBURSEMENTS:    10,
+  MAX_TOTAL_PAYLOAD_MB:  35,
+  ALLOWED_MIME_TYPES:    ['application/pdf', 'image/jpeg', 'image/png'],
+  MAX_DESCRIPTION_CHARS: 80,
+};
+const KAUSHIKI_EMAIL = 'kaushiki@anveshan.farm';
+
+const STATES = [
+  'Andhra Pradesh','Arunachal Pradesh','Assam','Bihar','Chhattisgarh','Goa','Gujarat',
+  'Haryana','Himachal Pradesh','Jharkhand','Karnataka','Kerala','Madhya Pradesh',
+  'Maharashtra','Manipur','Meghalaya','Mizoram','Nagaland','Odisha','Punjab','Rajasthan',
+  'Sikkim','Tamil Nadu','Telangana','Tripura','Uttar Pradesh','Uttarakhand','West Bengal',
+  'Andaman and Nicobar Islands','Chandigarh','Dadra and Nagar Haveli and Daman and Diu',
+  'Delhi','Jammu and Kashmir','Ladakh','Lakshadweep','Puducherry'
+];
+const stateSelect = document.getElementById('state');
+STATES.forEach(s => {
+  const o = document.createElement('option');
+  o.value = s; o.textContent = s;
+  stateSelect.appendChild(o);
+});
+
+/* ------------------------------------------------------------------ */
+/*  Validation patterns                                                */
+/* ------------------------------------------------------------------ */
+const RX = {
+  pan:     /^[A-Z]{5}[0-9]{4}[A-Z]$/,
+  ifsc:    /^[A-Z]{4}0[A-Z0-9]{6}$/,
+  email:   /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+  pincode: /^[0-9]{6}$/,
+  account: /^[0-9]{6,20}$/
+};
+
+/* ------------------------------------------------------------------ */
+/*  Default invoice date = today                                       */
+/* ------------------------------------------------------------------ */
+(function () {
+  const d = new Date();
+  const iso = d.getFullYear() + '-' +
+              String(d.getMonth()+1).padStart(2,'0') + '-' +
+              String(d.getDate()).padStart(2,'0');
+  document.getElementById('invoiceDate').value = iso;
+})();
+
+/* ------------------------------------------------------------------ */
+/*  Trade name -> bank account name default                            */
+/* ------------------------------------------------------------------ */
+const tradeNameInput   = document.getElementById('tradeName');
+const bankAccountInput = document.getElementById('bankAccountName');
+let bankNameTouched = false;
+bankAccountInput.addEventListener('input', () => { bankNameTouched = true; });
+tradeNameInput.addEventListener('input', () => {
+  if (!bankNameTouched) bankAccountInput.value = tradeNameInput.value;
+});
+
+/* ------------------------------------------------------------------ */
+/*  Uppercase / digits-only input hygiene                              */
+/* ------------------------------------------------------------------ */
+['pan','ifsc'].forEach(id => {
+  const el = document.getElementById(id);
+  el.addEventListener('input', () => {
+    const pos = el.selectionStart;
+    el.value = el.value.toUpperCase().replace(/\s+/g,'');
+    el.setSelectionRange(pos, pos);
+  });
+});
+['pincode','accountNumber','serviceAmount'].forEach(id => {
+  const el = document.getElementById(id);
+  el.addEventListener('input', () => {
+    el.value = el.value.replace(/\D/g,'');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  Description character counter                                      */
+/* ------------------------------------------------------------------ */
+const descInput   = document.getElementById('description');
+const descCounter = document.getElementById('descCounter');
+function updateDescCounter() {
+  const len = descInput.value.length;
+  descCounter.textContent = `${len} / ${LIMITS.MAX_DESCRIPTION_CHARS}`;
+  descCounter.classList.toggle('over', len > LIMITS.MAX_DESCRIPTION_CHARS);
+}
+descInput.addEventListener('input', updateDescCounter);
+updateDescCounter();
+
+/* ------------------------------------------------------------------ */
+/*  Validators (flat v2 schema)                                         */
+/* ------------------------------------------------------------------ */
+const required = v => v != null && String(v).trim().length > 0;
+const validators = {
+  tradeName:        v => ({ valid: required(v), message: required(v) ? '' : 'Required.' }),
+  signatoryName:    v => ({ valid: required(v), message: required(v) ? '' : 'Required.' }),
+  email:            v => ({ valid: RX.email.test(v.trim()), message: RX.email.test(v.trim()) ? '' : 'Enter a valid email address.' }),
+  pan:              v => {
+                       const t = v.trim().toUpperCase();
+                       if (!t) return { valid: false, message: 'Required.' };
+                       return { valid: RX.pan.test(t), message: RX.pan.test(t) ? '' : 'Invalid PAN. Format: ABCDE1234F.' };
+                     },
+  address1:         v => ({ valid: required(v), message: required(v) ? '' : 'Required.' }),
+  address2:         () => ({ valid: true, message: '' }),
+  city:             v => ({ valid: required(v), message: required(v) ? '' : 'Required.' }),
+  state:            v => ({ valid: required(v), message: required(v) ? '' : 'Select a state.' }),
+  pincode:          v => ({ valid: RX.pincode.test(v), message: RX.pincode.test(v) ? '' : '6-digit pincode.' }),
+  bankAccountName:  v => ({ valid: required(v), message: required(v) ? '' : 'Required.' }),
+  bankName:         v => ({ valid: required(v), message: required(v) ? '' : 'Required.' }),
+  accountNumber:    v => ({ valid: RX.account.test(v), message: RX.account.test(v) ? '' : 'Digits only, 6–20 long.' }),
+  ifsc:             v => {
+                       const t = v.trim().toUpperCase();
+                       if (!t) return { valid: false, message: 'Required.' };
+                       return { valid: RX.ifsc.test(t), message: RX.ifsc.test(t) ? '' : 'Invalid IFSC. Format: ABCD0123456.' };
+                     },
+  invoiceNumber:    v => ({ valid: required(v), message: required(v) ? '' : 'Required.' }),
+  invoiceDate:      v => ({ valid: required(v), message: required(v) ? '' : 'Required.' }),
+  description:      v => {
+                       const t = String(v || '').trim();
+                       if (!t) return { valid: false, message: 'Required — what was this invoice for?' };
+                       if (t.length > LIMITS.MAX_DESCRIPTION_CHARS) return { valid: false, message: `Keep it under ${LIMITS.MAX_DESCRIPTION_CHARS} characters.` };
+                       return { valid: true, message: '' };
+                     },
+  serviceAmount:    v => {
+                       const n = Number(v);
+                       if (!v || isNaN(n) || n <= 0 || Math.floor(n) !== n) {
+                         return { valid: false, message: 'Enter a whole-rupee amount greater than 0.' };
+                       }
+                       return { valid: true, message: '' };
+                     },
+  typedName:        v => ({ valid: required(v), message: required(v) ? '' : 'Required.' }),
+};
+
+const fieldEls = {};
+Object.keys(validators).forEach(name => {
+  fieldEls[name] = {
+    wrap:  document.querySelector(`[data-field="${name}"]`),
+    input: document.getElementById(name),
+  };
+});
+
+const touched = new Set();
+
+function setFieldState(name, valid, message) {
+  const { wrap } = fieldEls[name];
+  if (!wrap) return;
+  if (wrap.classList.contains('hidden')) {
+    wrap.classList.remove('invalid');
+    return;
+  }
+  const helper = wrap.querySelector('.helper');
+  if (helper && !helper.dataset.original) helper.dataset.original = helper.textContent;
+  if (touched.has(name)) {
+    wrap.classList.toggle('invalid', !valid);
+    if (helper) helper.textContent = !valid ? message : helper.dataset.original;
+  } else {
+    wrap.classList.remove('invalid');
+    if (helper) helper.textContent = helper.dataset.original;
+  }
+}
+
+function validateField(name) {
+  const { input } = fieldEls[name];
+  if (!input) return true;
+  const result = validators[name](input.value || '');
+  setFieldState(name, result.valid, result.message);
+  return result.valid;
+}
+
+Object.keys(validators).forEach(name => {
+  const { input } = fieldEls[name];
+  if (!input) return;
+  input.addEventListener('blur', () => {
+    touched.add(name);
+    validateField(name);
+    validateAll();
+  });
+  input.addEventListener('input', () => {
+    if (touched.has(name)) validateField(name);
+    validateAll();
+  });
+  input.addEventListener('change', () => {
+    touched.add(name);
+    validateField(name);
+    validateAll();
+  });
+});
+
+document.getElementById('consent').addEventListener('change', validateAll);
+
+/* ------------------------------------------------------------------ */
+/*  Reimbursements                                                     */
+/* ------------------------------------------------------------------ */
+const reimbList    = document.getElementById('reimbList');
+const reimbEmpty   = document.getElementById('reimbEmpty');
+const reimbAddBtn  = document.getElementById('reimbAdd');
+const reimbCountEl = document.getElementById('reimbCount');
+const payloadWarn  = document.getElementById('payloadWarn');
+const totalAmountEl   = document.getElementById('totalAmount');
+const totalBreakdown  = document.getElementById('totalBreakdown');
+const fmtINR0 = new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 });
+
+let nextReimbId = 1;
+const reimbState = new Map(); // id -> { fileBase64, fileName, mimeType, fileSize, fileError }
+
+function reimbRows() { return Array.from(reimbList.querySelectorAll('.reimb-row')); }
+
+function refreshReimbNumbering() {
+  const rows = reimbRows();
+  rows.forEach((row, i) => {
+    const numEl = row.querySelector('.reimb-num');
+    if (numEl) numEl.textContent = (i + 1) + '.';
+  });
+  reimbCountEl.textContent = rows.length;
+  reimbAddBtn.disabled = rows.length >= LIMITS.MAX_REIMBURSEMENTS;
+  reimbEmpty.classList.toggle('hidden', rows.length > 0);
+}
+
+function addReimbRow() {
+  const rows = reimbRows();
+  if (rows.length >= LIMITS.MAX_REIMBURSEMENTS) return;
+
+  const id = nextReimbId++;
+  reimbState.set(id, { fileBase64: null, fileName: null, mimeType: null, fileSize: 0, fileError: null });
+
+  const row = document.createElement('div');
+  row.className = 'reimb-row';
+  row.dataset.id = String(id);
+  row.innerHTML = `
+    <span class="reimb-num" aria-hidden="true">.</span>
+    <div>
+      <label for="reimbDesc-${id}">Description</label>
+      <input id="reimbDesc-${id}" class="reimb-desc" type="text" maxlength="${LIMITS.MAX_DESCRIPTION_CHARS}" placeholder="e.g., Studio rental" />
+    </div>
+    <div>
+      <label for="reimbAmt-${id}">Amount (₹)</label>
+      <input id="reimbAmt-${id}" class="reimb-amount" type="number" min="1" step="1" inputmode="numeric" placeholder="0" />
+    </div>
+    <div>
+      <label for="reimbFile-${id}">Bill</label>
+      <div class="file-picker">
+        <input id="reimbFile-${id}" class="reimb-file" type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" />
+        <label for="reimbFile-${id}" class="file-btn"><span class="file-label">Choose file…</span></label>
+      </div>
+    </div>
+    <button type="button" class="reimb-remove" aria-label="Remove this reimbursement" title="Remove">×</button>
+    <p class="row-error" data-row-error></p>
+  `;
+
+  reimbList.appendChild(row);
+
+  const descEl = row.querySelector('.reimb-desc');
+  const amtEl  = row.querySelector('.reimb-amount');
+  const fileEl = row.querySelector('.reimb-file');
+  const removeBtn = row.querySelector('.reimb-remove');
+
+  descEl.addEventListener('input',  () => { recomputeTotal(); validateAll(); });
+  descEl.addEventListener('blur',   () => { row.dataset.touched = '1'; validateAll(); });
+  amtEl.addEventListener('input', () => {
+    amtEl.value = amtEl.value.replace(/\D/g, '');
+    recomputeTotal(); validateAll();
+  });
+  amtEl.addEventListener('blur', () => { row.dataset.touched = '1'; validateAll(); });
+
+  fileEl.addEventListener('change', () => onFilePicked(id, fileEl, row));
+
+  removeBtn.addEventListener('click', () => {
+    reimbState.delete(id);
+    row.remove();
+    refreshReimbNumbering();
+    recomputeTotal();
+    validateAll();
+  });
+
+  refreshReimbNumbering();
+  recomputeTotal();
+  validateAll();
+  setTimeout(() => descEl.focus(), 0);
+}
+
+reimbAddBtn.addEventListener('click', addReimbRow);
+
+function onFilePicked(id, fileEl, row) {
+  const state = reimbState.get(id);
+  state.fileError = null;
+  state.fileBase64 = null;
+  state.fileName = null;
+  state.mimeType = null;
+  state.fileSize = 0;
+
+  const picker = row.querySelector('.file-picker');
+  const labelSpan = row.querySelector('.file-label');
+
+  const file = fileEl.files && fileEl.files[0];
+  if (!file) {
+    picker.classList.remove('has-file', 'invalid');
+    labelSpan.textContent = 'Choose file…';
+    row.dataset.touched = '1';
+    validateAll();
+    return;
+  }
+
+  // Validate MIME + size up front
+  if (LIMITS.ALLOWED_MIME_TYPES.indexOf(file.type) === -1) {
+    state.fileError = `Unsupported file type. Use PDF, JPG, or PNG.`;
+    picker.classList.remove('has-file');
+    picker.classList.add('invalid');
+    labelSpan.textContent = file.name;
+    row.dataset.touched = '1';
+    validateAll();
+    return;
+  }
+  if (file.size > LIMITS.MAX_FILE_SIZE_MB * 1024 * 1024) {
+    state.fileError = `File is over ${LIMITS.MAX_FILE_SIZE_MB} MB.`;
+    picker.classList.remove('has-file');
+    picker.classList.add('invalid');
+    labelSpan.textContent = file.name;
+    row.dataset.touched = '1';
+    validateAll();
+    return;
+  }
+
+  // Read as base64 (without data URL prefix)
+  const reader = new FileReader();
+  reader.onload = () => {
+    const dataUrl = String(reader.result || '');
+    const b64 = dataUrl.indexOf(',') >= 0 ? dataUrl.substring(dataUrl.indexOf(',') + 1) : dataUrl;
+    state.fileBase64 = b64;
+    state.fileName   = file.name;
+    state.mimeType   = file.type;
+    state.fileSize   = file.size;
+    picker.classList.remove('invalid');
+    picker.classList.add('has-file');
+    labelSpan.textContent = file.name;
+    row.dataset.touched = '1';
+    validateAll();
+  };
+  reader.onerror = () => {
+    state.fileError = 'Could not read this file.';
+    picker.classList.add('invalid');
+    row.dataset.touched = '1';
+    validateAll();
+  };
+  reader.readAsDataURL(file);
+}
+
+function recomputeTotal() {
+  const service = Number(document.getElementById('serviceAmount').value) || 0;
+  let reimbSum = 0;
+  reimbRows().forEach(row => {
+    const v = Number(row.querySelector('.reimb-amount').value);
+    if (!isNaN(v) && v > 0 && Math.floor(v) === v) reimbSum += v;
+  });
+  const total = service + reimbSum;
+  totalBreakdown.textContent = `Service ${fmtINR0.format(service)} + Reimbursements ${fmtINR0.format(reimbSum)}`;
+  totalAmountEl.textContent  = fmtINR0.format(total);
+  return total;
+}
+document.getElementById('serviceAmount').addEventListener('input', recomputeTotal);
+recomputeTotal();
+
+function validateReimbursements() {
+  const rows = reimbRows();
+  let allValid = true;
+  let totalRawBytes = 0;
+  let firstError = null;
+
+  rows.forEach(row => {
+    const id      = Number(row.dataset.id);
+    const state   = reimbState.get(id);
+    const desc    = row.querySelector('.reimb-desc').value.trim();
+    const amtRaw  = row.querySelector('.reimb-amount').value;
+    const amtNum  = Number(amtRaw);
+    const errorEl = row.querySelector('[data-row-error]');
+    const touchedRow = row.dataset.touched === '1';
+
+    let rowError = '';
+    if (!desc) rowError = 'Description is required.';
+    else if (desc.length > LIMITS.MAX_DESCRIPTION_CHARS) rowError = `Keep description under ${LIMITS.MAX_DESCRIPTION_CHARS} characters.`;
+    else if (!amtRaw || isNaN(amtNum) || amtNum <= 0 || Math.floor(amtNum) !== amtNum) rowError = 'Amount must be a whole rupee value greater than 0.';
+    else if (state.fileError) rowError = state.fileError;
+    else if (!state.fileBase64) rowError = 'Attach a bill (PDF, JPG, or PNG, ≤5 MB).';
+
+    if (rowError) {
+      allValid = false;
+      if (!firstError) firstError = rowError;
+    } else {
+      totalRawBytes += state.fileSize;
+    }
+
+    errorEl.textContent = touchedRow ? rowError : '';
+  });
+
+  // Check total payload
+  const maxBytes = LIMITS.MAX_TOTAL_PAYLOAD_MB * 1024 * 1024;
+  if (totalRawBytes > maxBytes) {
+    const mb = (totalRawBytes / (1024 * 1024)).toFixed(1);
+    payloadWarn.textContent = `Total attachments must be under ${LIMITS.MAX_TOTAL_PAYLOAD_MB} MB. You're at ${mb} MB. Try compressing your bills or removing some.`;
+    payloadWarn.classList.remove('hidden');
+    allValid = false;
+  } else {
+    payloadWarn.textContent = '';
+    payloadWarn.classList.add('hidden');
+  }
+
+  return { valid: allValid, totalRawBytes };
+}
+
+/* ------------------------------------------------------------------ */
+/*  validateAll: master gate for the submit button                     */
+/* ------------------------------------------------------------------ */
+function validateAll() {
+  let allValid = true;
+  let validCount = 0, totalCount = 0;
+  Object.keys(validators).forEach(name => {
+    const wrap = fieldEls[name].wrap;
+    if (wrap.classList.contains('hidden')) return;
+    if (name === 'address2') return; // optional, don't count
+    totalCount++;
+    const result = validators[name](fieldEls[name].input.value || '');
+    if (result.valid) validCount++;
+    else allValid = false;
+  });
+
+  // Reimbursements (only count toward "all valid", not progress meter)
+  const reimbResult = validateReimbursements();
+  if (!reimbResult.valid) allValid = false;
+
+  // Consent + signature
+  totalCount += 2;
+  if (document.getElementById('consent').checked) validCount++;
+  else allValid = false;
+  if (signatureHasStroke) validCount++;
+  else allValid = false;
+
+  updateProgress(validCount, totalCount);
+  updateSubmit(allValid);
+  return allValid;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Progress meter                                                     */
+/* ------------------------------------------------------------------ */
+const progressFill  = document.getElementById('progressFill');
+const progressCount = document.getElementById('progressCount');
+const progressTotal = document.getElementById('progressTotal');
+function updateProgress(valid, total) {
+  const pct = total ? Math.round((valid / total) * 100) : 0;
+  progressFill.style.width = pct + '%';
+  progressCount.textContent = valid;
+  progressTotal.textContent = total;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Signature pad                                                      */
+/* ------------------------------------------------------------------ */
+const canvas = document.getElementById('sig');
+const sigFrame = document.getElementById('sigFrame');
+let signatureHasStroke = false;
+let signaturePad;
+
+function resizeCanvas() {
+  const ratio = Math.max(window.devicePixelRatio || 1, 1);
+  const data = signaturePad ? signaturePad.toData() : null;
+  canvas.width = canvas.offsetWidth * ratio;
+  canvas.height = canvas.offsetHeight * ratio;
+  canvas.getContext('2d').scale(ratio, ratio);
+  if (signaturePad) {
+    signaturePad.clear();
+    if (data && data.length) signaturePad.fromData(data);
+  }
+}
+
+function initSignature() {
+  if (!window.SignaturePad) {
+    console.warn('SignaturePad not loaded');
+    return;
+  }
+  signaturePad = new SignaturePad(canvas, {
+    backgroundColor: 'rgba(255,255,255,0)',
+    penColor: '#1F2A22',
+    minWidth: 0.8,
+    maxWidth: 2.2,
+  });
+  signaturePad.addEventListener('beginStroke', () => {
+    signatureHasStroke = true;
+    sigFrame.classList.add('has-stroke');
+    validateAll();
+  });
+  signaturePad.addEventListener('endStroke', () => {
+    signatureHasStroke = !signaturePad.isEmpty();
+    sigFrame.classList.toggle('has-stroke', signatureHasStroke);
+    validateAll();
+  });
+  resizeCanvas();
+}
+
+window.addEventListener('load', initSignature);
+window.addEventListener('resize', resizeCanvas);
+
+document.getElementById('sigClear').addEventListener('click', () => {
+  if (signaturePad) signaturePad.clear();
+  signatureHasStroke = false;
+  sigFrame.classList.remove('has-stroke');
+  validateAll();
+});
+document.getElementById('sigDone').addEventListener('click', () => {
+  document.getElementById('typedName').focus();
+});
+
+/* ------------------------------------------------------------------ */
+/*  Submit gating                                                       */
+/* ------------------------------------------------------------------ */
+const submitBtn  = document.getElementById('submitBtn');
+const submitHint = document.getElementById('submitHint');
+function updateSubmit(allValid) {
+  submitBtn.disabled = !allValid;
+  if (submitBtn.dataset.busy === '1') return; // don't overwrite busy text
+  submitHint.textContent = allValid
+    ? 'Ready to submit.'
+    : 'Complete all fields, attach any reimbursement bills, and sign to enable.';
+}
+
+/* ------------------------------------------------------------------ */
+/*  Build payload (flat v2 schema)                                      */
+/* ------------------------------------------------------------------ */
+function buildPayload() {
+  const get = id => document.getElementById(id).value.trim();
+  const sigDataUrl = signaturePad && !signaturePad.isEmpty()
+    ? signaturePad.toDataURL('image/png')
+    : '';
+  const sigBase64 = sigDataUrl.indexOf(',') >= 0
+    ? sigDataUrl.substring(sigDataUrl.indexOf(',') + 1)
+    : '';
+
+  const reimbursements = reimbRows().map(row => {
+    const id = Number(row.dataset.id);
+    const state = reimbState.get(id) || {};
+    return {
+      description: row.querySelector('.reimb-desc').value.trim(),
+      amount:      Number(row.querySelector('.reimb-amount').value),
+      fileName:    state.fileName || '',
+      mimeType:    state.mimeType || '',
+      fileBase64:  state.fileBase64 || '',
+    };
+  });
+
+  return {
+    tradeName:          get('tradeName'),
+    signatoryName:      get('signatoryName'),
+    email:              get('email'),
+    pan:                get('pan').toUpperCase(),
+    addressLine1:       get('address1'),
+    addressLine2:       get('address2'),
+    city:               get('city'),
+    state:              get('state'),
+    pincode:            get('pincode'),
+    bankAccountName:    get('bankAccountName'),
+    bankName:           get('bankName'),
+    accountNumber:      get('accountNumber'),
+    ifsc:               get('ifsc').toUpperCase(),
+    invoiceNumber:      get('invoiceNumber'),
+    invoiceDate:        get('invoiceDate'),
+    description:        get('description'),
+    serviceAmount:      Number(get('serviceAmount')),
+    reimbursements:     reimbursements,
+    reference:          get('reference'),
+    signaturePngBase64: sigBase64,
+    consentTypedName:   get('typedName'),
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Submit                                                              */
+/* ------------------------------------------------------------------ */
+const form = document.getElementById('invoice-form');
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  Object.keys(validators).forEach(n => touched.add(n));
+  Object.keys(validators).forEach(n => validateField(n));
+  reimbRows().forEach(r => { r.dataset.touched = '1'; });
+  if (!validateAll()) {
+    submitHint.textContent = 'Fix the highlighted fields above.';
+    return;
+  }
+
+  submitBtn.dataset.busy = '1';
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Generating PDF + ZIP…';
+  submitHint.textContent = 'This may take 5–15 seconds depending on file count.';
+
+  let payload;
+  try {
+    payload = buildPayload();
+  } catch (err) {
+    console.error(err);
+    delete submitBtn.dataset.busy;
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Generate & submit invoice';
+    submitHint.textContent = 'Could not assemble submission. Please retry.';
+    return;
+  }
+
+  try {
+    // text/plain (not application/json) avoids a CORS preflight that
+    // Apps Script web apps don't respond to. The body is still JSON —
+    // the server parses e.postData.contents the same way.
+    const res = await fetch(APPS_SCRIPT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload),
+      redirect: 'follow',
+    });
+    const result = await res.json();
+
+    if (result && result.ok && result.zipBase64 && result.zipFileName) {
+      handleSuccess(payload, result);
+    } else {
+      delete submitBtn.dataset.busy;
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Generate & submit invoice';
+      submitHint.textContent = (result && result.error)
+        ? result.error
+        : 'Submission failed. Please try again.';
+    }
+  } catch (err) {
+    console.error(err);
+    delete submitBtn.dataset.busy;
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Generate & submit invoice';
+    submitHint.textContent = 'Network error. Please check your connection and try again.';
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/*  Success: trigger ZIP download + show success card                   */
+/* ------------------------------------------------------------------ */
+let successZipBlob = null;
+let successZipName = null;
+
+function base64ToBlob(b64, mimeType) {
+  const binary = atob(b64);
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mimeType });
+}
+
+function triggerDownload(blob, fileName) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, 0);
+}
+
+function handleSuccess(payload, result) {
+  successZipBlob = base64ToBlob(result.zipBase64, 'application/zip');
+  successZipName = result.zipFileName;
+
+  // Auto-download (browsers may suppress without user gesture, but the
+  // submit click counts as a gesture, so this usually works).
+  try { triggerDownload(successZipBlob, successZipName); } catch (e) { console.warn(e); }
+
+  // Pre-fill mailto subject
+  const subject = `Invoice ${payload.invoiceNumber} — ${payload.tradeName}`;
+  document.getElementById('mailtoLink').href =
+    `mailto:${KAUSHIKI_EMAIL}?subject=${encodeURIComponent(subject)}`;
+
+  // Swap UI
+  form.classList.add('hidden');
+  document.querySelectorAll('.ornament').forEach(o => o.classList.add('hidden'));
+  document.getElementById('successView').classList.remove('hidden');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+document.getElementById('downloadBtn').addEventListener('click', () => {
+  if (successZipBlob && successZipName) triggerDownload(successZipBlob, successZipName);
+});
+
+/* initial state */
+validateAll();
+</script>
+
+</body>
+</html>

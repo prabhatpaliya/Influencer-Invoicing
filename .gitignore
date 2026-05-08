@@ -1,0 +1,7 @@
+# macOS
+.DS_Store
+
+# Local-only artifacts (sample invoice + raw template — not for the public repo)
+SN2026-0001 (1).pdf
+Anveshan Bill of Supply — Non-GST Template.docx
+template.docx
