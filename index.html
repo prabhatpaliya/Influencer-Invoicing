@@ -1931,17 +1931,18 @@ function prepareSubmit() {
   submitBtn.textContent = 'Verifying…';
   submitHint.textContent = 'One moment — verifying you’re human.';
 
-  // If a fresh token is already in hand (e.g. from a previous attempt
-  // that failed before consuming it), submit directly. Otherwise ask
-  // Turnstile for one — onTurnstileSuccess will call actuallySubmit().
-  if (turnstileToken) {
-    actuallySubmit();
-    return;
-  }
-
+  // Always reset + execute on every submit. Turnstile tokens are
+  // single-use; a cached one (from a quirk, pre-clearance, or a prior
+  // attempt) will be rejected by Cloudflare's siteverify as
+  // timeout-or-duplicate, which surfaces as a confusing "click twice"
+  // bug. A fresh execute round-trip costs ~100-500ms — well worth it.
   pendingSubmit = true;
   if (window.turnstile && typeof window.turnstile.execute === 'function') {
     try {
+      turnstileToken = '';
+      if (typeof window.turnstile.reset === 'function') {
+        window.turnstile.reset(turnstileWidget);
+      }
       window.turnstile.execute(turnstileWidget);
     } catch (err) {
       console.error(err);
