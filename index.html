@@ -621,17 +621,9 @@
     font-style: italic;
   }
 
-  /* ───────────── turnstile ───────────── */
-  .turnstile-row {
-    margin-top: 40px;
-    display: flex;
-    justify-content: center;
-    min-height: 65px;
-  }
-
   /* ───────────── submit ───────────── */
   .submit-row {
-    margin-top: 24px;
+    margin-top: 48px;
     text-align: center;
   }
   .submit {
@@ -1236,14 +1228,15 @@
         </label>
       </section>
 
-      <div class="turnstile-row">
-        <div class="cf-turnstile"
-             data-sitekey="0x4AAAAAADL-RFFsmD60WkZk"
-             data-callback="onTurnstileSuccess"
-             data-error-callback="onTurnstileError"
-             data-expired-callback="onTurnstileExpired"
-             data-theme="light"></div>
-      </div>
+      <div class="cf-turnstile"
+           id="turnstileWidget"
+           data-sitekey="0x4AAAAAADL-RFFsmD60WkZk"
+           data-callback="onTurnstileSuccess"
+           data-error-callback="onTurnstileError"
+           data-expired-callback="onTurnstileExpired"
+           data-size="invisible"
+           data-execution="execute"
+           style="display:none"></div>
 
       <div class="submit-row">
         <button type="submit" class="submit" id="submitBtn" disabled>Generate &amp; submit invoice</button>
@@ -1285,20 +1278,35 @@ const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxzOvxkaYZcw_1_
 
 /* ------------------------------------------------------------------ */
 /*  Turnstile state + callbacks                                        */
+/*  Pattern: execute-on-submit. The widget renders invisible; we call  */
+/*  turnstile.execute() from prepareSubmit(), and the success callback */
+/*  drives actuallySubmit(). Turnstile is a step inside submission,    */
+/*  not a precondition gating the submit button.                       */
 /* ------------------------------------------------------------------ */
 let turnstileToken = '';
+let pendingSubmit = false;
+const turnstileWidget = document.getElementById('turnstileWidget');
 
 window.onTurnstileSuccess = function (token) {
   turnstileToken = token || '';
-  validateAll();
+  if (pendingSubmit) {
+    pendingSubmit = false;
+    actuallySubmit();
+  }
 };
 window.onTurnstileError = function () {
   turnstileToken = '';
-  validateAll();
+  if (pendingSubmit) {
+    pendingSubmit = false;
+    handleVerificationFailure('Verification couldn’t complete. Please click submit again.');
+  }
 };
 window.onTurnstileExpired = function () {
   turnstileToken = '';
-  validateAll();
+  if (pendingSubmit) {
+    pendingSubmit = false;
+    handleVerificationFailure('Verification timed out. Please click submit again.');
+  }
 };
 
 function resetTurnstile() {
@@ -1306,6 +1314,15 @@ function resetTurnstile() {
   if (window.turnstile && typeof window.turnstile.reset === 'function') {
     try { window.turnstile.reset(); } catch (e) { /* ignore */ }
   }
+}
+
+function handleVerificationFailure(message) {
+  delete submitBtn.dataset.busy;
+  submitBtn.disabled = false;
+  submitBtn.textContent = 'Generate & submit invoice';
+  submitHint.textContent = message;
+  resetTurnstile();
+  validateAll();
 }
 
 /* ------------------------------------------------------------------ */
@@ -1745,10 +1762,6 @@ function validateAll() {
   if (signatureHasStroke) validCount++;
   else allValid = false;
 
-  // Turnstile token gates submit but is not shown in the progress meter
-  // (it auto-completes once everything else is filled).
-  if (!turnstileToken) allValid = false;
-
   updateProgress(validCount, totalCount);
   updateSubmit(allValid);
   return allValid;
@@ -1832,13 +1845,9 @@ const submitHint = document.getElementById('submitHint');
 function updateSubmit(allValid) {
   submitBtn.disabled = !allValid;
   if (submitBtn.dataset.busy === '1') return; // don't overwrite busy text
-  if (allValid) {
-    submitHint.textContent = 'Ready to submit.';
-  } else if (!turnstileToken) {
-    submitHint.textContent = 'Complete all fields, sign, and pass the verification check above to enable.';
-  } else {
-    submitHint.textContent = 'Complete all fields, attach any reimbursement bills, and sign to enable.';
-  }
+  submitHint.textContent = allValid
+    ? 'Ready to submit.'
+    : 'Complete all fields, attach any reimbursement bills, and sign to enable.';
 }
 
 /* ------------------------------------------------------------------ */
@@ -1893,10 +1902,19 @@ function buildPayload() {
 
 /* ------------------------------------------------------------------ */
 /*  Submit                                                              */
+/*                                                                      */
+/*  prepareSubmit() validates the form, sets the busy UI, then fetches */
+/*  a fresh Turnstile token via turnstile.execute(). The success        */
+/*  callback (onTurnstileSuccess) calls actuallySubmit(), which does    */
+/*  the network call and response handling.                            */
 /* ------------------------------------------------------------------ */
 const form = document.getElementById('invoice-form');
-form.addEventListener('submit', async (e) => {
+form.addEventListener('submit', (e) => {
   e.preventDefault();
+  prepareSubmit();
+});
+
+function prepareSubmit() {
   Object.keys(validators).forEach(n => touched.add(n));
   Object.keys(validators).forEach(n => validateField(n));
   reimbRows().forEach(r => { r.dataset.touched = '1'; });
@@ -1907,6 +1925,33 @@ form.addEventListener('submit', async (e) => {
 
   submitBtn.dataset.busy = '1';
   submitBtn.disabled = true;
+  submitBtn.textContent = 'Verifying…';
+  submitHint.textContent = 'One moment — verifying you’re human.';
+
+  // If a fresh token is already in hand (e.g. from a previous attempt
+  // that failed before consuming it), submit directly. Otherwise ask
+  // Turnstile for one — onTurnstileSuccess will call actuallySubmit().
+  if (turnstileToken) {
+    actuallySubmit();
+    return;
+  }
+
+  pendingSubmit = true;
+  if (window.turnstile && typeof window.turnstile.execute === 'function') {
+    try {
+      window.turnstile.execute(turnstileWidget);
+    } catch (err) {
+      console.error(err);
+      pendingSubmit = false;
+      handleVerificationFailure('Could not start verification. Please reload the page and try again.');
+    }
+  } else {
+    pendingSubmit = false;
+    handleVerificationFailure('Verification script not loaded. Please reload the page and try again.');
+  }
+}
+
+async function actuallySubmit() {
   submitBtn.textContent = 'Generating PDF + ZIP…';
   submitHint.textContent = 'This may take 5–15 seconds depending on file count.';
 
@@ -1915,10 +1960,7 @@ form.addEventListener('submit', async (e) => {
     payload = buildPayload();
   } catch (err) {
     console.error(err);
-    delete submitBtn.dataset.busy;
-    submitBtn.disabled = false;
-    submitBtn.textContent = 'Generate & submit invoice';
-    submitHint.textContent = 'Could not assemble submission. Please retry.';
+    handleVerificationFailure('Could not assemble submission. Please retry.');
     return;
   }
 
@@ -1935,28 +1977,18 @@ form.addEventListener('submit', async (e) => {
     const result = await res.json();
 
     if (result && result.ok && result.zipBase64 && result.zipFileName) {
+      resetTurnstile();
       handleSuccess(payload, result);
     } else {
-      delete submitBtn.dataset.busy;
-      submitBtn.disabled = false;
-      submitBtn.textContent = 'Generate & submit invoice';
-      submitHint.textContent = (result && result.error)
+      handleVerificationFailure((result && result.error)
         ? result.error
-        : 'Submission failed. Please try again.';
-      // Turnstile tokens are single-use; reset so the user can retry.
-      resetTurnstile();
-      validateAll();
+        : 'Submission failed. Please try again.');
     }
   } catch (err) {
     console.error(err);
-    delete submitBtn.dataset.busy;
-    submitBtn.disabled = false;
-    submitBtn.textContent = 'Generate & submit invoice';
-    submitHint.textContent = 'Network error. Please check your connection and try again.';
-    resetTurnstile();
-    validateAll();
+    handleVerificationFailure('Network error. Please check your connection and try again.');
   }
-});
+}
 
 /* ------------------------------------------------------------------ */
 /*  Success: trigger ZIP download + show success card                   */
